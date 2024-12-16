@@ -14,7 +14,15 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/build/debug)
 
 # add_subdirectory(include)
-# add_subdirectory(utils)
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
-add_executable(server src/server.c)
-add_executable(client src/client.c)
+add_library(shared 
+    src/common.c
+    src/tftp_packet.c
+)
+
+add_executable(server src/tftp_server.c)
+target_link_libraries(server shared)
+
+add_executable(client src/tftp_client.c)
+target_link_libraries(client shared)
