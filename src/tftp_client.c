@@ -90,6 +90,7 @@ int main(int argc, char **argv) {
     // if (tftp_send_ack(s, ack, s_addr, socklen) < 0) {
     //     exit(EXIT_FAILURE);
     // }
+    fclose(fd);
 
     close(s);
 }

@@ -21,6 +21,7 @@ int handle_req(int s, tftp_pkt pkt, struct sockaddr *addr, socklen_t slen) {
     while (!should_close) {
         puts("Sending...");
         bytes_read = fread(data, 1, BLOCK_SIZE, fd);
+        block_nr++;
         if (bytes_read < BLOCK_SIZE) {
             should_close = true;
         }
@@ -35,7 +36,6 @@ int handle_req(int s, tftp_pkt pkt, struct sockaddr *addr, socklen_t slen) {
         switch (ntohs(pkt.opcode)) {
         case ACK:
             printf("ACK: %d\n", ntohs(pkt.ack.block_nr));
-            block_nr++;
             continue;
         case ERROR:
             printf("ERROR: %s\n", (char *)pkt.error.error_str);
@@ -45,6 +45,7 @@ int handle_req(int s, tftp_pkt pkt, struct sockaddr *addr, socklen_t slen) {
         }
     }
     printf("Sent %d blocks of data.\n", block_nr);
+    fclose(fd);
 
     return 1;
 }
