@@ -18,6 +18,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_library(shared 
     src/common.c
+    src/utils.c
     src/tftp.c
 )
 
