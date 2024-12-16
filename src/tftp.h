@@ -48,8 +48,9 @@ typedef union {
 } tftp_pkt;
 
 ssize_t tftp_recv(int s, tftp_pkt *pkt, int flags, struct sockaddr *addr,
-                  socklen_t *len);
-ssize_t tftp_send(int s, tftp_pkt *pkt, struct sockaddr *addr, socklen_t len);
+                  socklen_t *slen);
+ssize_t tftp_send(int s, tftp_pkt *pkt, ssize_t dlen, struct sockaddr *addr,
+                  socklen_t slen);
 
 ssize_t tftp_send_req(int s, uint16_t opcode, char *filename, char *mode,
                       struct sockaddr *addr, socklen_t len);
