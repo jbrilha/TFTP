@@ -2,6 +2,7 @@
 #define TFTP_H
 
 #include "common.h"
+#include "utils.h"
 
 #define BLOCK_SIZE 512
 #define MODE_SIZE 10
@@ -65,5 +66,7 @@ ssize_t tftp_send_error(int s, uint16_t error_code, char *error_str,
                         struct sockaddr *addr, socklen_t len);
 
 const char *opcode_to_str(uint16_t opcode);
+
+uint16_t str_to_opcode(char *op_str);
 
 #endif /* TFTP_H */

@@ -1,6 +1,4 @@
 #include "tftp.h"
-#include <stdint.h>
-#include <sys/_types/_ssize_t.h>
 
 const char *opcode_to_str(uint16_t opcode) {
     switch (opcode) {
@@ -17,6 +15,22 @@ const char *opcode_to_str(uint16_t opcode) {
     default:
         return "UNKNOWN";
     }
+}
+
+uint16_t str_to_opcode(char *op_str) {
+    if (!strcasecmp(op_str, "RRQ")) {
+        return RRQ;
+    } else if (!strcasecmp(op_str, "WRQ")) {
+        return WRQ;
+    } else if (!strcasecmp(op_str, "DATA")) {
+        return DATA;
+    } else if (!strcasecmp(op_str, "ACK")) {
+        return ACK;
+    } else if (!strcasecmp(op_str, "ERROR")) {
+        return ERROR;
+    }
+
+    return 0;
 }
 
 ssize_t tftp_send_req(int s, uint16_t opcode, char *filename, char *mode,
