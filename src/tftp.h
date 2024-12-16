@@ -2,9 +2,9 @@
 #define TFTP_H
 
 #include "common.h"
-#include <stdint.h>
 
 #define BLOCK_SIZE 512
+#define MODE_SIZE 10
 
 enum opcode { RRQ = 1, WRQ, DATA, ACK, ERROR };
 enum errcode {
@@ -22,9 +22,9 @@ typedef union {
     uint16_t opcode;
     struct {
         uint16_t opcode;
-        uint8_t filename[BLOCK_SIZE];
+        uint8_t filename[BLOCK_SIZE - MODE_SIZE];
         uint8_t fn_term; /* filename terminator byte */
-        uint8_t mode[32];
+        uint8_t mode[MODE_SIZE];
         uint8_t mode_term; /* mode terminator byte */
     } req;
 
