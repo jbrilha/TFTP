@@ -18,7 +18,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_library(shared 
     src/common.c
-    src/tftp_packet.c
+    src/tftp.c
 )
 
 add_executable(server src/tftp_server.c)
