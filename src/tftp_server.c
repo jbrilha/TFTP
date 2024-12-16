@@ -1,4 +1,5 @@
 #include "tftp_server.h"
+#include "tftp.h"
 
 int handle_req(int s, tftp_pkt pkt, struct sockaddr *addr, socklen_t slen) {
     FILE *fd;
@@ -13,18 +14,44 @@ int handle_req(int s, tftp_pkt pkt, struct sockaddr *addr, socklen_t slen) {
     }
 
     uint8_t data[BLOCK_SIZE];
-    size_t bytes_read = fread(data, 1, BLOCK_SIZE, fd);
-    if (bytes_read != 512) {
-        printf("only read: %zu", bytes_read);
+    size_t bytes_read;
+    uint16_t block_nr = 0;
+    bool should_close = false;
+
+    while (!should_close) {
+        puts("Sending...");
+        bytes_read = fread(data, 1, BLOCK_SIZE, fd);
+        if (bytes_read < BLOCK_SIZE) {
+            should_close = true;
+        }
+
+        if (tftp_send_data(s, block_nr, data, bytes_read, addr, slen) < 0) {
+            exit(EXIT_FAILURE);
+        }
+
+        if (tftp_recv(s, &pkt, 0, addr, &slen) < 0) {
+            exit(EXIT_FAILURE);
+        }
+        switch (ntohs(pkt.opcode)) {
+        case ACK:
+            printf("ACK: %d\n", ntohs(pkt.ack.block_nr));
+            block_nr++;
+            continue;
+        case ERROR:
+            printf("ERROR: %s\n", (char *)pkt.error.error_str);
+            break;
+        default:
+            printf("%d shit\n", ntohs(pkt.opcode));
+        }
     }
-    tftp_send_data(s, 1, data, bytes_read, addr, slen);
+    printf("Sent %d blocks of data.\n", block_nr);
 
     return 1;
 }
 
 int main(int argc, char **argv) {
     int s = create_ipv4_socket();
-    if(s < 0) {
+    if (s < 0) {
         exit(EXIT_FAILURE);
     }
     struct sockaddr_in c_addr_in;
