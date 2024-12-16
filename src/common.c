@@ -14,6 +14,10 @@
 
 #include "common.h"
 
+int validate_mode(char *mode) {
+    return !strcasecmp(mode, "netascii") || !strcasecmp(mode, "octet");
+}
+
 int create_ipv6_socket(void) {
     int s;
     if ((s = socket(AF_INET6, SOCK_DGRAM, 0)) < 0) {

@@ -2,6 +2,7 @@
 #define COMMON_H
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -14,6 +15,8 @@
 #include <unistd.h>
 
 #define PORT 5000
+
+int validate_mode(char *mode);
 
 int create_ipv6_socket(void);
 
