@@ -20,9 +20,33 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    socklen_t len;
+    tftp_pkt pkt;
+    len = sizeof(s_addr_in);
+
+    if (tftp_recv(s, &pkt, 0, s_addr, &len) < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    switch (ntohs(pkt.opcode)) {
+    case RRQ:
+    case DATA:
+        printf("DATA: %s\n", (char *)pkt.data.data);
+        break;
+    case ACK:
+        printf("ACK: %d\n", ntohs(pkt.ack.block_nr));
+        break;
+    case ERROR:
+        printf("ERROR: %s\n", (char *)pkt.error.error_str);
+        break;
+    default:
+        printf("%d shit\n", ntohs(pkt.opcode));
+    }
+
     char *data = "dataAAAAAA";
+    size_t data_len = strlen(data);
     uint16_t blocknr = 1;
-    if (tftp_send_data(s, blocknr, data, s_addr, socklen) < 0) {
+    if (tftp_send_data(s, blocknr, data, data_len, s_addr, socklen) < 0) {
         exit(EXIT_FAILURE);
     }
 
