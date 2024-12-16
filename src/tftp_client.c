@@ -1,53 +1,44 @@
 #include "tftp_client.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <sys/_types/_ssize_t.h>
 
-int main(int argc, char **argv) {
-    printf("oiu0;\n");
-    int s = create_ipv4_socket();
-    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
-    // struct sockaddr_in6 s_addr_in = init_ipv6_addr(PORT, false);
-    socklen_t socklen = sizeof(s_addr_in);
-    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
-
-    // unnecessary for udp
-    /* int c = connect(sock, (struct sockaddr *)&server_addr,
-    sizeof(server_addr)); if (c < 0) { perror("Failed to connect socket\n");
-        exit(EXIT_FAILURE);
-    } */
-
-    uint16_t op = RRQ;
-    char *filename = "file.txt";
-    char *mode = "octet";
-    printf("oiu1;\n");
-    if (tftp_send_req(s, op, filename, mode, s_addr, socklen) < 0) {
-        exit(EXIT_FAILURE);
-    }
-
-    // socklen_t len;
+ssize_t handle_recv(int s, struct sockaddr *s_addr, char *filename,
+                    socklen_t slen) {
     tftp_pkt pkt;
-    // len = sizeof(s_addr_in);
-
     FILE *fd;
-    fd = fopen("file_client.txt", "w");
+    fd = fopen("client_file.txt", "w");
     if (fd == NULL) {
-        perror("client: openfile");
-        exit(1);
+        perror("server: handle_req");
+        char *err_str;
+        uint16_t err_code;
+        if (errno == EEXIST) {
+            err_str = "File already exists.";
+            err_code = FILE_EXISTS;
+        } else if (errno == EACCES) {
+            // should check this before even requesting tho
+            err_str = "Insufficient permissions to write file.";
+            err_code = ACCESS_VIOLATION;
+        } else if (errno == ENOSPC) {
+                err_str = "Insufficient disk space";
+                err_code = DISK_FULL;
+        } else {
+            err_str = "Uknown file error.";
+            err_code = UNDEFINED;
+        }
+
+        return tftp_send_error(s, err_code, err_str, s_addr, slen);
     }
 
     bool should_close = false;
     ssize_t dlen;
-    ssize_t recv_len;
     while (!should_close) {
-        if ((recv_len = tftp_recv(s, &pkt, 0, s_addr, &socklen)) < 0) {
+        if ((dlen = tftp_recv(s, &pkt, 0, s_addr, &slen)) < 0) {
             exit(EXIT_FAILURE);
         }
-        printf("Raw received length: %zd\n", recv_len);
-        printf("Size of tftp_pkt: %zu\n", sizeof(tftp_pkt));
-        // need to subtract 4 because union makes each pkt expand to the size
-        // of a req pkt, meeaning there's always 2 extra bytes (the terminator)
-        dlen = recv_len - 4;
+
+        dlen -= 4;
+        if (dlen < BLOCK_SIZE) {
+            should_close = true;
+        }
+
         uint16_t ack;
         switch (ntohs(pkt.opcode)) {
         case DATA:
@@ -57,7 +48,7 @@ int main(int argc, char **argv) {
                 exit(EXIT_FAILURE);
             }
             fflush(fd);
-            if (tftp_send_ack(s, ack, s_addr, socklen) < 0) {
+            if (tftp_send_ack(s, ack, s_addr, slen) < 0) {
                 exit(EXIT_FAILURE);
             }
             printf("DATA — bnr:%u / %d\n", ntohs(pkt.data.block_nr), dlen);
@@ -72,29 +63,50 @@ int main(int argc, char **argv) {
             printf("%d shit\n", ntohs(pkt.opcode));
         }
     }
+    fclose(fd);
+}
+
+int main(int argc, char **argv) {
     char *filename, *mode;
     uint16_t opcode;
     parse_args(argc, argv, &opcode, &filename, &mode);
     printf("%hu|%s|%s\n", opcode, filename, mode);
+
+    int s = create_ipv4_socket();
+    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
+    // struct sockaddr_in6 s_addr_in = init_ipv6_addr(PORT, false);
+    socklen_t slen = sizeof(s_addr_in);
+    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
+
+    // unnecessary for udp
+    /* int c = connect(sock, (struct sockaddr *)&server_addr,
+    sizeof(server_addr)); if (c < 0) { perror("Failed to connect socket\n");
+        exit(EXIT_FAILURE);
+    } */
+
+    if (tftp_send_req(s, opcode, filename, mode, s_addr, slen) < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    handle_recv(s, s_addr, filename, slen);
+
     // char *data = "dataAAAAAA";
     // size_t data_len = strlen(data);
     // uint16_t blocknr = 1;
-    // if (tftp_send_data(s, blocknr, data, data_len, s_addr, socklen) < 0)
-    // {
+    // if (tftp_send_data(s, blocknr, data, data_len, s_addr, slen) < 0) {
     //     exit(EXIT_FAILURE);
     // }
     //
     // char *err = "errorrrrrr";
     // uint16_t errcode = 15;
-    // if (tftp_send_error(s, errcode, err, s_addr, socklen) < 0) {
+    // if (tftp_send_error(s, errcode, err, s_addr, slen) < 0) {
     //     exit(EXIT_FAILURE);
     // }
     //
-    // // uint16_t ack = 5;
-    // if (tftp_send_ack(s, ack, s_addr, socklen) < 0) {
+    // uint16_t ack = 5;
+    // if (tftp_send_ack(s, ack, s_addr, slen) < 0) {
     //     exit(EXIT_FAILURE);
     // }
-    fclose(fd);
 
     close(s);
 }
