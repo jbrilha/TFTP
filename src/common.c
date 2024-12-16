@@ -30,6 +30,18 @@ int create_ipv4_socket(void) {
     return s;
 }
 
+/*
+ * should only be used if the sockaddr in use is IPv6
+ */
+int allow_ipv4(int s) {
+    int off = 0;
+    int o;
+    if ((o = setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off))) < 0) {
+        perror("setsockopt IPV6_V6ONLY");
+    }
+    return o;
+}
+
 struct sockaddr_in6 init_ipv6_addr(uint16_t port, bool is_server) {
     struct sockaddr_in6 addr;
     memset(&addr, 0, sizeof(addr));
@@ -46,16 +58,6 @@ struct sockaddr_in6 init_ipv6_addr(uint16_t port, bool is_server) {
     // }
 
     return addr;
-}
-
-int allow_ipv4(int sock) {
-    int off = 0;
-    if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)) < 0) {
-        perror("setsockopt IPV6_V6ONLY");
-        return -1;
-    }
-
-    return 0;
 }
 
 struct sockaddr_in init_ipv4_addr(uint16_t port, bool is_server) {
