@@ -53,19 +53,27 @@ ssize_t tftp_recv(int s, tftp_pkt *pkt, int flags, struct sockaddr *addr,
 ssize_t tftp_send(int s, tftp_pkt *pkt, ssize_t dlen, struct sockaddr *addr,
                   socklen_t slen);
 
-ssize_t tftp_send_req(int s, uint16_t opcode, char *filename, char *mode,
+ssize_t tftp_send_req(int s, tftp_pkt *pkt, uint16_t opcode, char *filename,
+                      char *mode, struct sockaddr *addr, socklen_t len);
+
+ssize_t tftp_send_data(int s, tftp_pkt *pkt, uint16_t block_nr, uint8_t *data,
+                       size_t data_len, struct sockaddr *addr, socklen_t len);
+
+ssize_t tftp_send_ack(int s, tftp_pkt *pkt, uint16_t block_nr,
                       struct sockaddr *addr, socklen_t len);
 
-ssize_t tftp_send_data(int s, uint16_t block_nr, uint8_t *data, size_t data_len,
-                       struct sockaddr *addr, socklen_t len);
+ssize_t tftp_send_error(int s, tftp_pkt *pkt, uint16_t error_code,
+                        const char *error_str, struct sockaddr *addr,
+                        socklen_t len);
 
-ssize_t tftp_send_ack(int s, uint16_t block_nr, struct sockaddr *addr,
-                      socklen_t len);
+ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *s_addr,
+                     socklen_t slen);
+ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr,
+                    socklen_t slen);
+void handle_file_error(uint16_t *err_code, const char **err_str);
 
-ssize_t tftp_send_error(int s, uint16_t error_code, char *error_str,
-                        struct sockaddr *addr, socklen_t len);
-
-const char *opcode_to_str(uint16_t opcode);
+const char *errcode_to_str(enum errcode code);
+const char *opcode_to_str(enum opcode code);
 
 uint16_t str_to_opcode(char *op_str);
 
