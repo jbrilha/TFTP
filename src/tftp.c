@@ -107,3 +107,7 @@ ssize_t tftp_recv(int s, tftp_pkt *pkt, int flags, struct sockaddr *addr,
 
     return n;
 }
+
+int validate_mode(char *mode) {
+    return !strcasecmp(mode, "netascii") || !strcasecmp(mode, "octet");
+}

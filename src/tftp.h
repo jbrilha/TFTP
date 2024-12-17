@@ -69,4 +69,6 @@ const char *opcode_to_str(uint16_t opcode);
 
 uint16_t str_to_opcode(char *op_str);
 
+int validate_mode(char *mode);
+
 #endif /* TFTP_H */

@@ -16,8 +16,6 @@
 
 #define PORT 5000
 
-int validate_mode(char *mode);
-
 int create_ipv6_socket(void);
 
 int create_ipv4_socket(void);
