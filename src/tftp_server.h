@@ -3,6 +3,6 @@
 
 #include "tftp.h"
 
-ssize_t recv_reqs(int s);
+void recv_reqs(int s);
 
 #endif /* TFTP_SERVER_H */
