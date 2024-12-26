@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
         printf("File already exists. Overwrite? [y/N] ");
         if (fgets(response, sizeof(response), stdin) == NULL ||
             tolower(response[0]) != 'y') {
-            puts("Terminaning client...");
+            puts("Terminating client...");
             exit(EXIT_FAILURE);
         }
     }
