@@ -1,5 +1,4 @@
 #include "tftp_client.h"
-#include "tftp.h"
 
 int main(int argc, char **argv) {
     char *filename, *mode;
@@ -16,12 +15,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    int s = create_ipv4_socket();
+    int s;
+    if ((s = create_ipv4_socket()) < 0) {
+        exit(EXIT_FAILURE);
+    }
+
     struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
     socklen_t slen = sizeof(s_addr_in);
     struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
 
-    tftp_pkt pkt;
     const char *err_str;
     uint16_t err_code;
     const char *f_mode = (opcode == RRQ) ? "w" : "r";
@@ -31,58 +33,62 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    tftp_pkt pkt;
+    if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
+        cleanup_and_exit(fd, s, filename, opcode == RRQ);
+    }
+
     switch (opcode) {
     case RRQ:
-        if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
-            close(s);
-            exit(EXIT_FAILURE);
-        }
         if (handle_write(s, &pkt, s_addr, slen, fd) < 0) {
-            printf("RRQ failed with ERROR: %s\n",
-                   errcode_to_str(ntohs(pkt.error.error_code)));
-            remove(filename);
+            fprintf(stderr, "RRQ failed with ERROR: %s\n",
+                    errcode_to_str(ntohs(pkt.error.error_code)));
+            cleanup_and_exit(fd, s, filename, true);
         }
         break;
     case WRQ:
-        }
-        if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
-            close(s);
-            exit(EXIT_FAILURE);
-        }
-
         if (tftp_recv(s, &pkt, 0, s_addr, &slen) < 0) {
-            perror("Expected ACK");
-        } else {
-            u_int16_t ack_or_err = htons(pkt.opcode);
-            if (ack_or_err == ACK && pkt.ack.block_nr == 0) {
-                if (handle_read(s, &pkt, s_addr, slen, fd) < 0) {
-                    printf("WRQ failed with ERROR: %s\n",
-                           errcode_to_str(ntohs(pkt.error.error_code)));
-                }
-            } else if (ack_or_err == ERROR) {
-                printf("WRQ failed: %s\n",
-                       errcode_to_str(ntohs(pkt.error.error_code)));
-                fclose(fd);
-                close(s);
-                exit(EXIT_FAILURE);
-            } else {
-                perror("WRQ failed");
-                fclose(fd);
-                close(s);
-                exit(EXIT_FAILURE);
-            }
-            printf("%zd\n", htons(pkt.opcode));
+            perror("Expected ACK or ERROR");
+            cleanup_and_exit(fd, s, filename, false);
+        }
+
+        u_int16_t ack_or_err = htons(pkt.opcode);
+        if (ack_or_err == ERROR) {
+            fprintf(stderr, "WRQ failed: %s\n",
+                    errcode_to_str(ntohs(pkt.error.error_code)));
+            cleanup_and_exit(fd, s, filename, false);
+        }
+
+        u_int16_t ack_block_nr = ntohs(pkt.ack.block_nr);
+        if (ack_or_err != ACK || ack_block_nr != 0) {
+            fprintf(stderr,
+                    "WRQ failed: Expected ACK block_nr 0, received %d\n",
+                    ack_block_nr);
+            cleanup_and_exit(fd, s, filename, false);
+        }
+
+        if (handle_read(s, &pkt, s_addr, slen, fd) < 0) {
+            fprintf(stderr, "WRQ failed with ERROR: %s\n",
+                    errcode_to_str(ntohs(pkt.error.error_code)));
+            cleanup_and_exit(fd, s, filename, false);
         }
         break;
-    default:
-        break;
-    }
-
     }
 
     fclose(fd);
     close(s);
     exit(EXIT_SUCCESS);
+}
+
+void cleanup_and_exit(FILE *fd, int socket, const char *filename,
+                      bool remove_file) {
+    if (fd)
+        fclose(fd);
+    if (socket >= 0)
+        close(socket);
+    if (remove_file)
+        remove(filename);
+    exit(EXIT_FAILURE);
 }
 
 void parse_args(int argc, char **argv, uint16_t *opcode, char **filename,
