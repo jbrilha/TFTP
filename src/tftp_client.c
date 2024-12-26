@@ -24,23 +24,15 @@ int main(int argc, char **argv) {
     tftp_pkt pkt;
     const char *err_str;
     uint16_t err_code;
-    FILE *fd;
-    bool file_is_open = false;
+    const char *f_mode = (opcode == RRQ) ? "w" : "r";
+    FILE *fd = open_file(filename, f_mode, &err_code, &err_str);
+    if (fd == NULL) {
+        close(s);
+        exit(EXIT_FAILURE);
+    }
 
     switch (opcode) {
     case RRQ:
-        fd = fopen(filename, "w");
-        if (fd == NULL) {
-            perror("fd");
-            handle_file_error(&err_code, &err_str);
-            printf("Could not open file '%s' for writing: [%d] %s\n", filename,
-                   err_code, err_str);
-            close(s);
-            exit(EXIT_FAILURE);
-        } else {
-            file_is_open = true;
-        }
-
         if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
             close(s);
             exit(EXIT_FAILURE);
@@ -52,16 +44,6 @@ int main(int argc, char **argv) {
         }
         break;
     case WRQ:
-        fd = fopen(filename, "r");
-        if (fd == NULL) {
-            perror("fd");
-            handle_file_error(&err_code, &err_str);
-            printf("Could not open file '%s' for reading: [%d] %s\n", filename,
-                   err_code, err_str);
-            close(s);
-            exit(EXIT_FAILURE);
-        } else {
-            file_is_open = true;
         }
         if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
             close(s);
@@ -96,10 +78,9 @@ int main(int argc, char **argv) {
         break;
     }
 
-    if (file_is_open) {
-        fclose(fd);
     }
 
+    fclose(fd);
     close(s);
     exit(EXIT_SUCCESS);
 }

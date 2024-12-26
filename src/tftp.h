@@ -68,9 +68,11 @@ ssize_t tftp_send_error(int s, tftp_pkt *pkt, uint16_t error_code,
 
 ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *s_addr,
                      socklen_t slen, FILE *fd);
-ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr,
-                    socklen_t slen, FILE* fd);
+ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen,
+                    FILE *fd);
 void handle_file_error(uint16_t *err_code, const char **err_str);
+FILE *open_file(const char *filename, const char *mode, uint16_t *err_code,
+                const char **err_str);
 
 const char *errcode_to_str(enum errcode code);
 const char *opcode_to_str(enum opcode code);

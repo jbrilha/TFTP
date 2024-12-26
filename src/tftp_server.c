@@ -35,6 +35,20 @@ ssize_t recv_reqs(int s) {
     const char *err_str;
     uint16_t err_code;
     FILE *fd;
+        char *filename = (char *)pkt->req.filename;
+        fd = open_file(filename, "r", &err_code, &err_str);
+        if (fd == NULL) {
+            tftp_send_error(s, pkt, err_code, err_str, addr, slen);
+            close(s);
+            return;
+        }
+        char *filename = (char *)pkt->req.filename;
+        fd = open_file(filename, "wx", &err_code, &err_str);
+        if (fd == NULL) {
+            tftp_send_error(s, pkt, err_code, err_str, addr, slen);
+            close(s);
+            return;
+        }
 
     while (1) {
         tftp_pkt pkt;

@@ -71,6 +71,20 @@ void handle_file_error(uint16_t *err_code, const char **err_str) {
     }
 }
 
+FILE *open_file(const char *filename, const char *mode, uint16_t *err_code,
+                const char **err_str) {
+
+    FILE *fd = fopen(filename, mode);
+    if (fd == NULL) {
+        perror("fd");
+        handle_file_error(err_code, err_str);
+        printf("Could not open file '%s' in mode '%s': [%d] %s\n", filename,
+               mode, *err_code, *err_str);
+    }
+
+    return fd;
+}
+
 ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *addr,
                      socklen_t slen, FILE *fd) {
     bool should_close = false;
