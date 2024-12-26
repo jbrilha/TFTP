@@ -71,57 +71,36 @@ void handle_file_error(uint16_t *err_code, const char **err_str) {
     }
 }
 
-ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *s_addr,
-                     socklen_t slen) {
-    FILE *fd;
-    bool should_close = false, file_is_open = false;
-    ssize_t dlen;
-    puts("1");
+ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *addr,
+                     socklen_t slen, FILE *fd) {
+    bool should_close = false;
+    size_t dlen;
     char filename[BLOCK_SIZE];
     strncpy(filename, (char *)pkt->req.filename, sizeof(filename) - 1);
+    uint16_t ack = 0;
 
-    puts("2");
     while (!should_close) {
-    puts("3");
-        if ((dlen = tftp_recv(s, pkt, 0, s_addr, &slen)) < 0) {
-            exit(EXIT_FAILURE);
+        if ((dlen = tftp_recv(s, pkt, 0, addr, &slen)) < 0) {
+            return dlen;
         }
-    puts("4");
 
         dlen -= 4;
         if (dlen < BLOCK_SIZE) {
             should_close = true;
         }
-    puts("5");
 
-        uint16_t ack;
         switch (ntohs(pkt->opcode)) {
         case DATA:
-    puts("6");
-            if (!file_is_open) {
-                fd = fopen(filename, "w");
-                if (fd == NULL) {
-                    perror("handle_write");
-                    const char *err_str;
-                    uint16_t err_code;
-                    handle_file_error(&err_code, &err_str);
-    puts("7");
-                    return tftp_send_error(s, pkt, err_code, err_str, s_addr,
-                                           slen);
-                }
-                file_is_open = true;
-            }
-
             ack = ntohs(pkt->data.block_nr);
             if (fwrite(pkt->data.data, 1, dlen, fd) != dlen) {
                 perror("fwrite failed");
-                exit(EXIT_FAILURE);
+                return -1;
             }
             fflush(fd);
-            if (tftp_send_ack(s, pkt, ack, s_addr, slen) < 0) {
-                exit(EXIT_FAILURE);
+            if ((dlen = tftp_send_ack(s, pkt, ack, addr, slen)) < 0) {
+                return dlen;
             }
-            printf("WRITE DATA — bnr:%u / %d\n", ntohs(pkt->data.block_nr),
+            printf("WRITE DATA — bnr:%u / %zu\n", ntohs(pkt->data.block_nr),
                    dlen);
             break;
         case ACK:
@@ -129,32 +108,20 @@ ssize_t handle_write(int s, tftp_pkt *pkt, struct sockaddr *s_addr,
             break;
         case ERROR:
             printf("WRITE ERROR: %s\n", (char *)pkt->error.error_str);
-            break;
+            should_close = true;
+            return -1;
         default:
             printf("WRITE %d shit\n", ntohs(pkt->opcode));
+            return -1;
         }
     }
-    puts("8");
 
-    if (file_is_open)
-        fclose(fd);
+    return 0;
 }
 
-ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr,
-                    socklen_t slen) {
-    FILE *fd;
-    char *filename = (char *)pkt->req.filename;
+ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen,
+                    FILE *fd) {
     ssize_t r;
-
-    fd = fopen(filename, "r");
-    if (fd == NULL) {
-        perror("handle_write");
-        const char *err_str;
-        uint16_t err_code;
-        handle_file_error(&err_code, &err_str);
-        tftp_send_error(s, pkt, err_code, err_str, addr, slen);
-        return -1;
-    }
 
     uint8_t data[BLOCK_SIZE];
     size_t dlen;
@@ -184,6 +151,7 @@ ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr,
             continue;
         case ERROR:
             printf("READ ERROR: %s\n", (char *)pkt->error.error_str);
+            should_close = true;
             break;
         default:
             printf("READ %d shit\n", ntohs(pkt->opcode));
@@ -191,7 +159,6 @@ ssize_t handle_read(int s, tftp_pkt *pkt, struct sockaddr *addr,
     }
 
     printf("Sent %d blocks of data.\n", block_nr);
-    fclose(fd);
 
     return r;
 }

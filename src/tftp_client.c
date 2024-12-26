@@ -1,49 +1,107 @@
 #include "tftp_client.h"
+#include "tftp.h"
 
 int main(int argc, char **argv) {
     char *filename, *mode;
     uint16_t opcode;
     parse_args(argc, argv, &opcode, &filename, &mode);
-    // printf("%hu|%s|%s\n", opcode, filename, mode);
-
-    int s = create_ipv4_socket();
-    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
-    // struct sockaddr_in6 s_addr_in = init_ipv6_addr(PORT, false);
-    socklen_t slen = sizeof(s_addr_in);
-    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
-
-    // unnecessary for udp
-    /* int c = connect(sock, (struct sockaddr *)&server_addr,
-    sizeof(server_addr)); if (c < 0) { perror("Failed to connect socket\n");
-        exit(EXIT_FAILURE);
-    } */
 
     if (!access(filename, F_OK) && opcode == RRQ) {
         char response[3];
         printf("File already exists. Overwrite? [y/N] ");
         if (fgets(response, sizeof(response), stdin) == NULL ||
-            (response[0] != 'y' && response[0] != 'Y')) {
+            tolower(response[0]) != 'y') {
             puts("Terminaning client...");
             exit(EXIT_FAILURE);
         }
     }
 
+    int s = create_ipv4_socket();
+    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
+    socklen_t slen = sizeof(s_addr_in);
+    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
+
     tftp_pkt pkt;
-    if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
-        exit(EXIT_FAILURE);
-    }
+    const char *err_str;
+    uint16_t err_code;
+    FILE *fd;
+    bool file_is_open = false;
 
     switch (opcode) {
     case RRQ:
-        handle_write(s, &pkt, s_addr, slen);
+        fd = fopen(filename, "w");
+        if (fd == NULL) {
+            perror("fd");
+            handle_file_error(&err_code, &err_str);
+            printf("Could not open file '%s' for writing: [%d] %s\n", filename,
+                   err_code, err_str);
+            close(s);
+            exit(EXIT_FAILURE);
+        } else {
+            file_is_open = true;
+        }
+
+        if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
+            close(s);
+            exit(EXIT_FAILURE);
+        }
+        if (handle_write(s, &pkt, s_addr, slen, fd) < 0) {
+            printf("RRQ failed with ERROR: %s\n",
+                   errcode_to_str(ntohs(pkt.error.error_code)));
+            remove(filename);
+        }
         break;
     case WRQ:
-        handle_read(s, &pkt, s_addr, slen);
+        fd = fopen(filename, "r");
+        if (fd == NULL) {
+            perror("fd");
+            handle_file_error(&err_code, &err_str);
+            printf("Could not open file '%s' for reading: [%d] %s\n", filename,
+                   err_code, err_str);
+            close(s);
+            exit(EXIT_FAILURE);
+        } else {
+            file_is_open = true;
+        }
+        if (tftp_send_req(s, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
+            close(s);
+            exit(EXIT_FAILURE);
+        }
+
+        if (tftp_recv(s, &pkt, 0, s_addr, &slen) < 0) {
+            perror("Expected ACK");
+        } else {
+            u_int16_t ack_or_err = htons(pkt.opcode);
+            if (ack_or_err == ACK && pkt.ack.block_nr == 0) {
+                if (handle_read(s, &pkt, s_addr, slen, fd) < 0) {
+                    printf("WRQ failed with ERROR: %s\n",
+                           errcode_to_str(ntohs(pkt.error.error_code)));
+                }
+            } else if (ack_or_err == ERROR) {
+                printf("WRQ failed: %s\n",
+                       errcode_to_str(ntohs(pkt.error.error_code)));
+                fclose(fd);
+                close(s);
+                exit(EXIT_FAILURE);
+            } else {
+                perror("WRQ failed");
+                fclose(fd);
+                close(s);
+                exit(EXIT_FAILURE);
+            }
+            printf("%zd\n", htons(pkt.opcode));
+        }
+        break;
     default:
         break;
     }
 
+    if (file_is_open) {
+        fclose(fd);
+    }
+
     close(s);
+    exit(EXIT_SUCCESS);
 }
 
 void parse_args(int argc, char **argv, uint16_t *opcode, char **filename,
