@@ -23,6 +23,35 @@ int main(int argc, char **argv) {
     exit(EXIT_SUCCESS);
 }
 
+void recv_reqs(int sock) {
+    struct sockaddr_in c_addr_in;
+    struct sockaddr *c_addr = (struct sockaddr *)&c_addr_in;
+
+    socklen_t slen;
+    pid_t pid;
+
+    while (1) {
+        tftp_pkt pkt;
+        slen = sizeof(c_addr_in);
+
+        if (tftp_recv_pkt(sock, &pkt, 0, c_addr, &slen) < 0) {
+            perror("Invalid request packet");
+            continue;
+        }
+
+        pid = fork();
+        if (pid < 0) {
+            perror("Fork failed");
+            continue;
+        } else if (pid == 0) {
+            printf("pid %d\n", pid);
+            close(sock); // child processes can close server socket
+            handle_client(&pkt, c_addr, slen);
+            exit(EXIT_SUCCESS);
+        }
+    }
+}
+
 void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
     int sock;
     if ((sock = create_ipv4_socket()) < 0) {
@@ -78,32 +107,5 @@ void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
     }
 
     fclose(fd);
-
-void recv_reqs(int s) {
-    struct sockaddr_in c_addr_in;
-    struct sockaddr *c_addr = (struct sockaddr *)&c_addr_in;
-
-    socklen_t slen;
-    pid_t pid;
-
-    while (1) {
-        tftp_pkt pkt;
-        slen = sizeof(c_addr_in);
-
-        if (tftp_recv(s, &pkt, 0, c_addr, &slen) < 0) {
-            perror("Invalid request packet");
-            continue;
-        }
-
-        pid = fork();
-        if (pid < 0) {
-            perror("Fork failed");
-            continue;
-        } else if (pid == 0) {
-            printf("pid %d\n", pid);
-            close(s);
-            handle_client(&pkt, c_addr, slen);
-            exit(EXIT_SUCCESS);
-        }
-    }
+    close(sock);
 }
