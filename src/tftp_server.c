@@ -1,34 +1,33 @@
 #include "tftp_server.h"
 
 int main(int argc, char **argv) {
-    int s;
-    if ((s = create_ipv4_socket()) < 0) {
+    int sock;
+    if ((sock = create_ipv4_socket()) < 0) {
         exit(EXIT_FAILURE);
     }
 
     struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, true);
     struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
 
-    if (bind(s, s_addr, sizeof(s_addr_in)) < 0) {
+    if (bind(sock, s_addr, sizeof(s_addr_in)) < 0) {
         perror("Failed to bind socket");
-        close(s);
+        close(sock);
         exit(EXIT_FAILURE);
     }
 
     signal(SIGCHLD, SIG_IGN);
 
-    recv_reqs(s);
+    recv_reqs(sock);
 
-    close(s);
+    close(sock);
     exit(EXIT_SUCCESS);
 }
 
 void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
-    int s;
-    if ((s = create_ipv4_socket()) < 0) {
+    int sock;
+    if ((sock = create_ipv4_socket()) < 0) {
         return;
     }
-    ssize_t r;
 
     const char *err_str;
     uint16_t err_code;
@@ -40,12 +39,12 @@ void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
         char *filename = (char *)pkt->req.filename;
         fd = open_file(filename, "r", &err_code, &err_str);
         if (fd == NULL) {
-            tftp_send_error(s, pkt, err_code, err_str, addr, slen);
-            close(s);
+            tftp_send_error(sock, pkt, err_code, err_str, addr, slen);
+            close(sock);
             return;
         }
         printf("RRQ for: %s\n", filename);
-        if ((r = handle_read(s, pkt, addr, slen, fd)) < 0) {
+        if (read_from_file(sock, pkt, addr, slen, fd) < 0) {
             fprintf(stderr, "RRQ failed with ERROR: %s\n",
                     errcode_to_str(ntohs(pkt->error.error_code)));
         }
@@ -54,17 +53,17 @@ void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
         char *filename = (char *)pkt->req.filename;
         fd = open_file(filename, "wx", &err_code, &err_str);
         if (fd == NULL) {
-            tftp_send_error(s, pkt, err_code, err_str, addr, slen);
-            close(s);
+            tftp_send_error(sock, pkt, err_code, err_str, addr, slen);
+            close(sock);
             return;
         }
 
-        if (tftp_send_ack(s, pkt, 0, addr, slen) < 0) {
+        if (tftp_send_ack(sock, pkt, 0, addr, slen) < 0) {
             perror("Failed to send ACK");
             break;
         }
 
-        if ((r = handle_write(s, pkt, addr, slen, fd)) < 0) {
+        if (write_to_file(sock, pkt, addr, slen, fd) < 0) {
             // TODO error.error_code might not always be set
             fprintf(stderr, "WRQ failed with ERROR: %s\n",
                     errcode_to_str(ntohs(pkt->error.error_code)));
@@ -74,13 +73,11 @@ void handle_client(tftp_pkt *pkt, struct sockaddr *addr, socklen_t slen) {
     default:
         fprintf(stderr, "Invalid opcode: <%d>\nExpected RRQ or WRQ.\n", opcode);
 
-        close(s);
+        close(sock);
         return;
     }
 
     fclose(fd);
-    close(s);
-}
 
 void recv_reqs(int s) {
     struct sockaddr_in c_addr_in;
