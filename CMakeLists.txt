@@ -20,6 +20,7 @@ add_library(shared
     src/common.c
     src/utils.c
     src/tftp.c
+    src/progress.c
 )
 
 add_executable(server src/tftp_server.c)
