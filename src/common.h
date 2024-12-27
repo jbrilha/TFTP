@@ -14,8 +14,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define PORT 5000
-
 int create_ipv6_socket(void);
 
 int create_ipv4_socket(void);

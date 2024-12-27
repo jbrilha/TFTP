@@ -4,6 +4,7 @@
 #include "common.h"
 #include "utils.h"
 
+#define PORT 69
 #define BLOCK_SIZE 512
 #define MODE_SIZE 10 // either 'octet' or 'netascii' so 10 is plenty
 #define MAX_RETRIES 5
