@@ -20,10 +20,6 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
-    socklen_t slen = sizeof(s_addr_in);
-    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
-
     const char *err_str;
     uint16_t err_code;
     const char *f_mode = (opcode == RRQ) ? "w" : "r";
@@ -33,52 +29,79 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    if (send_req(sock, opcode, filename, mode, fd) < 0) {
+        cleanup_and_exit(fd, sock, filename, opcode == RRQ);
+    }
+
+    close(sock);
+    exit(EXIT_SUCCESS);
+}
+
+ssize_t send_req(int sock, u_int16_t opcode, char *filename, char *mode,
+                 FILE *fd) {
+    struct sockaddr_in s_addr_in = init_ipv4_addr(PORT, false);
+    socklen_t slen = sizeof(s_addr_in);
+    struct sockaddr *s_addr = (struct sockaddr *)&s_addr_in;
+
     tftp_pkt pkt;
     if (tftp_send_req(sock, &pkt, opcode, filename, mode, s_addr, slen) < 0) {
-        cleanup_and_exit(fd, sock, filename, opcode == RRQ);
+        return -1;
     }
 
     switch (opcode) {
     case RRQ:
-        if (write_to_file(sock, &pkt, s_addr, slen, fd) < 0) {
-            fprintf(stderr, "RRQ failed with ERROR: %s\n",
-                    errcode_to_str(ntohs(pkt.error.error_code)));
-            cleanup_and_exit(fd, sock, filename, true);
-        }
+        return handle_RRQ(sock, &pkt, s_addr, slen, fd);
         break;
     case WRQ:
-        if ((tftp_recv_pkt(sock, &pkt, 0, s_addr, &slen) < 0) ||
-            (htons(pkt.opcode) != ACK && htons(pkt.opcode) != ERROR)) {
-            perror("Expected ACK or ERROR");
-            cleanup_and_exit(fd, sock, filename, false);
-        }
-
-        u_int16_t ack_or_err = htons(pkt.opcode);
-        if (ack_or_err == ERROR) {
-            fprintf(stderr, "WRQ failed: %s\n",
-                    errcode_to_str(ntohs(pkt.error.error_code)));
-            cleanup_and_exit(fd, sock, filename, false);
-        }
-
-        u_int16_t ack_block_nr = ntohs(pkt.ack.block_nr);
-        if (ack_or_err == ACK && ack_block_nr != 0) {
-            fprintf(stderr,
-                    "WRQ failed: Expected ACK block_nr 0, received %d\n",
-                    ack_block_nr);
-            cleanup_and_exit(fd, sock, filename, false);
-        }
-
-        if (read_from_file(sock, &pkt, s_addr, slen, fd) < 0) {
-            fprintf(stderr, "WRQ failed with ERROR: %s\n",
-                    errcode_to_str(ntohs(pkt.error.error_code)));
-            cleanup_and_exit(fd, sock, filename, false);
-        }
+        return handle_WRQ(sock, &pkt, s_addr, slen, fd);
         break;
     }
 
+    return -1;
+}
+
+ssize_t handle_RRQ(int sock, tftp_pkt *pkt, struct sockaddr *addr,
+                   socklen_t slen, FILE *fd) {
+    if (write_to_file(sock, pkt, addr, slen, fd) < 0) {
+        fprintf(stderr, "RRQ failed with ERROR: %s\n",
+                errcode_to_str(ntohs(pkt->error.error_code)));
+        return -1;
+    }
+
     fclose(fd);
-    close(sock);
-    exit(EXIT_SUCCESS);
+    return 1;
+}
+
+ssize_t handle_WRQ(int sock, tftp_pkt *pkt, struct sockaddr *addr,
+                   socklen_t slen, FILE *fd) {
+    if ((tftp_recv_pkt(sock, pkt, 0, addr, &slen) < 0) ||
+        (htons(pkt->opcode) != ACK && htons(pkt->opcode) != ERROR)) {
+        perror("Expected ACK or ERROR");
+        return -1;
+    }
+
+    u_int16_t ack_or_err = htons(pkt->opcode);
+    if (ack_or_err == ERROR) {
+        fprintf(stderr, "WRQ failed: %s\n",
+                errcode_to_str(ntohs(pkt->error.error_code)));
+        return -1;
+    }
+
+    u_int16_t ack_block_nr = ntohs(pkt->ack.block_nr);
+    if (ack_or_err == ACK && ack_block_nr != 0) {
+        fprintf(stderr, "WRQ failed: Expected ACK block_nr 0, received %d\n",
+                ack_block_nr);
+        return -1;
+    }
+
+    if (read_from_file(sock, pkt, addr, slen, fd) < 0) {
+        fprintf(stderr, "WRQ failed with ERROR: %s\n",
+                errcode_to_str(ntohs(pkt->error.error_code)));
+        return -1;
+    }
+
+    fclose(fd);
+    return 1;
 }
 
 void cleanup_and_exit(FILE *fd, int socket, const char *filename,
