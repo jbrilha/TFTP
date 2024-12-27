@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "utils.h"
+#include "progress.h"
 
 #define PORT 69
 #define BLOCK_SIZE 512
