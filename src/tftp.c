@@ -91,80 +91,108 @@ FILE *open_file(const char *filename, const char *mode, uint16_t *err_code,
 
 ssize_t write_to_file(int sock, tftp_pkt *pkt, struct sockaddr *addr,
                       socklen_t slen, FILE *fd) {
-    bool should_close = false;
-    size_t dlen;
-    ssize_t r;
-    char filename[BLOCK_SIZE];
-    strncpy(filename, (char *)pkt->req.filename, sizeof(filename) - 1);
-    uint16_t expected_block_nr = 1;
-    uint16_t received_block_nr;
-
     struct timeval tv = {.tv_sec = TIMEOUT, .tv_usec = 0};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    bool retry;
-    u_int8_t retries;
+    char filename[BLOCK_SIZE];
+    strncpy(filename, (char *)pkt->req.filename, sizeof(filename) - 1);
+
+    u_int8_t recv_retries, ack_retries;
+    uint16_t ack_block_nr, expected_block_nr = 1;
+    size_t dlen;
+    ssize_t r;
+
+    bool retry, should_close = false;
+    struct receiver_stats stats;
+    init_stats(&stats);
+    puts("Starting transfer");
+
     while (!should_close) {
-        retries = 0;
+        ack_retries = 0;
 
         do {
             retry = false;
             if ((r = tftp_recv_pkt(sock, pkt, 0, addr, &slen)) < 0) {
-                if (errno == EAGAIN && ++retries < MAX_RETRIES) {
+                if (errno == EAGAIN && ++recv_retries < MAX_RETRIES) {
                     retry = true;
+                    fprintf(stderr, "\nFailed to receive packet [%d / %d]\n",
+                            recv_retries, MAX_RETRIES);
                     continue;
                 }
+                const char *err_str = "Failed to receive packet";
+                tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
                 return r;
-            } else {
-                dlen = r;
             }
+            recv_retries = 0;
 
-            dlen -= 4;
+            dlen = r - 4;
             if (dlen < BLOCK_SIZE) {
                 should_close = true;
             }
 
             switch (ntohs(pkt->opcode)) {
             case DATA:
-                received_block_nr = ntohs(pkt->data.block_nr);
-                if (received_block_nr < expected_block_nr) {
+                ack_block_nr = ntohs(pkt->data.block_nr);
+                if (ack_block_nr < expected_block_nr) {
                     retry = false;
-                } else if (received_block_nr == expected_block_nr) {
-                    if (fwrite(pkt->data.data, 1, dlen, fd) != dlen) {
-                        perror("fwrite failed");
+                } else if (ack_block_nr == expected_block_nr) {
+                    if (fwrite(pkt->data.data, 1, dlen, fd) != dlen ||
+                        ferror(fd)) {
+                        const char *err_str = "Failed to write to file";
+                        perror(err_str);
+                        tftp_send_error(sock, pkt, UNDEFINED, err_str, addr,
+                                        slen);
                         return -1;
                     }
-                    printf("WRITE DATA — bnr:%u / %zu\n",
-                           ntohs(pkt->data.block_nr), dlen);
                     fflush(fd);
+                    update_stats(&stats, dlen);
                     expected_block_nr++;
                     retry = false;
                 } else {
-                    retry = true;
-                    printf("bad bnr: %d expected %d\n",
-                           ntohs(pkt->data.block_nr), expected_block_nr);
-                    break;
+                    if (++ack_retries < MAX_RETRIES) {
+                        retry = true;
+                    }
+                    ack_block_nr = expected_block_nr - 1;
+                    fprintf(
+                        stderr,
+                        "\nInvalid block_nr received: (%d) but expected (%d).\n"
+                        "Resending ack %d [%d / %d]\n",
+                        ntohs(pkt->data.block_nr), expected_block_nr,
+                        ack_block_nr, recv_retries, MAX_RETRIES);
                 }
 
-                if ((r = tftp_send_ack(sock, pkt, received_block_nr, addr,
-                                       slen)) < 0) {
+                if ((r = tftp_send_ack(sock, pkt, ack_block_nr, addr, slen)) <
+                    0) {
+                    const char *err_str =
+                        "Failed to send ACK, likely network issue";
+                    tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
                     return r;
                 }
-                printf("Sent ack: %d\n", received_block_nr);
-
-                break;
-            case ACK: // this case should never happen
-                printf("WRITE ACK: %d\n", ntohs(pkt->ack.block_nr));
                 break;
             case ERROR:
-                printf("WRITE ERROR: %s\n", (char *)pkt->error.error_str);
-                should_close = true;
+                fprintf(stderr, "WRITE ERROR: %s\n", (char *)pkt->error.error_str);
                 return -1;
             default:
-                printf("WRITE %d shit\n", ntohs(pkt->opcode));
-                return -1;
+                fprintf(stderr, "WRITE invalid packet: %d\n", ntohs(pkt->opcode));
+                const char *err_str = "Invalid packet received";
+                tftp_send_error(sock, pkt, ILLEGAL_OP, err_str, addr, slen);
+                return -EINVAL;
             }
-        } while (retry && retries < MAX_RETRIES);
+        } while (retry && recv_retries < MAX_RETRIES &&
+                 ack_retries < MAX_RETRIES);
+
+        if (recv_retries >= MAX_RETRIES || ack_retries >= MAX_RETRIES) {
+            const char *err_str = "Max retries exceeded, ending transmission";
+            perror(err_str);
+            tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
+            return -ETIMEDOUT;
+        }
+    }
+
+    if (should_close) {
+        show_receiver_stats(&stats);
+    } else {
+        puts("Transfer failed to complete");
     }
 
     return r;
@@ -172,22 +200,35 @@ ssize_t write_to_file(int sock, tftp_pkt *pkt, struct sockaddr *addr,
 
 ssize_t read_from_file(int sock, tftp_pkt *pkt, struct sockaddr *addr,
                        socklen_t slen, FILE *fd) {
-    ssize_t r;
-
-    uint8_t data[BLOCK_SIZE];
-    size_t dlen;
-    uint16_t block_nr = 1, ack_nr;
-    bool should_close = false;
-    bool resend;
-
     struct timeval tv = {.tv_sec = TIMEOUT, .tv_usec = 0};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    u_int8_t retries;
+    uint8_t data[BLOCK_SIZE];
+    u_int8_t recv_retries, ack_retries;
+    uint16_t block_nr = 1, ack_nr;
+    size_t dlen;
+    ssize_t r;
+
+    bool should_close = false;
+    bool resend;
+
+    struct sender_progress progress;
+    fseek(fd, 0L, SEEK_END);
+    size_t file_size = ftell(fd);
+    fseek(fd, 0L, SEEK_SET);
+    init_progress(&progress, file_size);
+    puts("Starting transfer");
+
     while (!should_close) {
-        retries = 0;
+        ack_retries = 0;
 
         dlen = fread(data, 1, BLOCK_SIZE, fd);
+        if (ferror(fd)) {
+            const char *err_str = "Failed to read from file";
+            perror(err_str);
+            tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
+            return -1;
+        }
         if (dlen < BLOCK_SIZE) {
             should_close = true;
         }
@@ -195,56 +236,70 @@ ssize_t read_from_file(int sock, tftp_pkt *pkt, struct sockaddr *addr,
         do {
             resend = false;
 
-            printf("Sending block %d size %zu\n", block_nr, dlen);
             if ((r = tftp_send_data(sock, pkt, block_nr, data, dlen, addr,
                                     slen)) < 0) {
+                const char *err_str =
+                    "Failed to send data packet, likely network issue";
+                tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
                 return r;
             }
 
             if ((r = tftp_recv_pkt(sock, pkt, 0, addr, &slen)) < 0) {
-                if (errno == EAGAIN && ++retries < MAX_RETRIES) {
+                if (errno == EAGAIN && ++recv_retries < MAX_RETRIES) {
+                    fprintf(stderr,
+                            "\nFailed to receive ACK, resending data [%d / %d]\n",
+                            recv_retries, MAX_RETRIES);
                     resend = true;
                     continue;
                 }
+                const char *err_str = "Failed to receive packet";
+                tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
                 return r;
             }
+            recv_retries = 0;
 
             switch (ntohs(pkt->opcode)) {
             case ACK:
                 ack_nr = ntohs(pkt->ack.block_nr);
-                // printf("READ ACK: %d\n", ack_nr);
                 if (ack_nr >= block_nr) {
                     block_nr++;
-                    // puts("good ack");
-                    retries = 0;
+                    update_progress(&progress, dlen);
                     resend = false;
                 } else {
-                    printf("bad ack: %d expected %d\n", ack_nr, block_nr);
-                    if (++retries < MAX_RETRIES) {
+                    if (++ack_retries < MAX_RETRIES) {
                         resend = true;
                     }
+                    fprintf(stderr,
+                            "Invalid ACK received: (%d) but expected (%d).\n"
+                            "Resending data [%d / %d]",
+                            ack_nr, block_nr, ack_retries, MAX_RETRIES);
                 }
                 break;
             case ERROR:
                 printf("READ ERROR: %s\n", (char *)pkt->error.error_str);
-                should_close = true;
-                resend = false;
-                break;
+                return -1;
             default:
-                resend = true;
-                retries++;
-                printf("READ %d shit\n", ntohs(pkt->opcode));
+                fprintf(stderr, "READ invalid packet: %d", ntohs(pkt->opcode));
+                const char *err_str = "Invalid packet received";
+                tftp_send_error(sock, pkt, ILLEGAL_OP, err_str, addr, slen);
+                return -EINVAL;
             }
-        } while (resend && retries < MAX_RETRIES);
-        printf("\n");
+        } while (resend && recv_retries < MAX_RETRIES &&
+                 ack_retries < MAX_RETRIES);
 
-        if (retries >= MAX_RETRIES) {
-            perror("Max retries exceeded");
+        if (recv_retries >= MAX_RETRIES || ack_retries >= MAX_RETRIES) {
+            const char *err_str = "Max retries exceeded, ending transmission";
+            perror(err_str);
+            tftp_send_error(sock, pkt, UNDEFINED, err_str, addr, slen);
             return -ETIMEDOUT;
         }
     }
 
-    printf("Sent %d blocks of data.\n", block_nr - 1);
+    if (should_close) {
+        show_sender_completion(&progress);
+    } else {
+        puts("Transfer failed to complete");
+    }
 
     return r;
 }
@@ -322,10 +377,5 @@ ssize_t tftp_send_pkt(int sock, tftp_pkt *pkt, ssize_t dlen,
 
 ssize_t tftp_recv_pkt(int sock, tftp_pkt *pkt, int flags, struct sockaddr *addr,
                       socklen_t *slen) {
-    ssize_t n = recvfrom(sock, pkt, sizeof(*pkt), flags, addr, slen);
-    if (n < 0) {
-        perror("Failed to receive packet");
-    }
-
-    return n;
+    return recvfrom(sock, pkt, sizeof(*pkt), flags, addr, slen);
 }
